@@ -28,6 +28,9 @@ jobs:
       - name: Build Kernel
         run: |
           cd kernel
+          # Link the system linker into the clang path to override the old one
+          ln -sf /usr/bin/ld.lld $GITHUB_WORKSPACE/clang/bin/ld
+          
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/lemonades_perf_defconfig
           make -j$(nproc --all) O=out ARCH=arm64 \
@@ -35,7 +38,8 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 \
-            LLVM_IAS=1
+            LLVM_IAS=1 \
+            LD=ld.lld
             
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
