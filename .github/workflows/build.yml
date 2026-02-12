@@ -1,6 +1,6 @@
-name: Build OnePlus 9R Kernel (4.19.300)
+name: Build 9R SukiSU-SusFS Triple-Fallback
 on:
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   build:
@@ -9,43 +9,91 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Build Essentials
+      - name: Environment Setup
         run: |
           sudo apt update
-          sudo apt install -y bc bison build-essential flex git libelf-dev libssl-dev python3
+          sudo apt install -y bc bison build-essential flex git libelf-dev libssl-dev python3-is-python3 zip curl clang lld gcc-aarch64-linux-gnu
 
-      - name: Clone Kernel Source
+      - name: Clone 9R Kernel Source
         run: |
-          git clone --depth=1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 -b lineage-21 kernel
+          git clone --depth=1 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 -b lineage-21 kernel
+
+      - name: Apply SukiSU & SusFS Patches
+        run: |
           cd kernel
-          # Apply SusFS & SukiSU Hooks (Automated Script)
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -
 
-      - name: Setup Clang
+      # --- ATTEMPT 1: PROTON CLANG (Optimized) ---
+      - name: Build (Proton Clang)
+        id: proton
+        continue-on-error: true
         run: |
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang-proton
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang-proton/bin:$PATH
+          make O=out ARCH=arm64 vendor/sm8250-perf_defconfig
+          # Inject Version & zRAM
+          sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf-g057b0d30e003"/' out/.config
+          sed -i 's/CONFIG_LOCALVERSION_AUTO=y/CONFIG_LOCALVERSION_AUTO=n/' out/.config
+          echo "CONFIG_ZRAM=y" >> out/.config
+          
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error"
 
-      - name: Build Kernel
+      # --- ATTEMPT 2: GOOGLE CLANG (Official AOSP) ---
+      - name: Build (Google Clang Fallback)
+        if: steps.proton.outcome == 'failure'
+        id: google_clang
+        continue-on-error: true
         run: |
           cd kernel
-          # This command creates a link so the compiler finds the linker
-          ln -sf /usr/bin/ld.lld $GITHUB_WORKSPACE/clang/bin/ld
-          
-          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          
-          # WE CHANGED THE NAME HERE TO MATCH CRDROID'S SOURCE
+          rm -rf out
           make O=out ARCH=arm64 vendor/sm8250-perf_defconfig
+          sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf-g057b0d30e003"/' out/.config
+          echo "CONFIG_ZRAM=y" >> out/.config
           
-          make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            LD=ld.lld
-            
-      - name: Upload Kernel Image
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 KCFLAGS="-w -Wno-error"
+
+      # --- ATTEMPT 3: GCC (The Nuclear Option) ---
+      - name: Build (GCC Fallback)
+        if: steps.google_clang.outcome == 'failure'
+        run: |
+          echo "Clang failed. Falling back to GCC..."
+          cd kernel
+          rm -rf out
+          make O=out ARCH=arm64 vendor/sm8250-perf_defconfig
+          sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf-g057b0d30e003"/' out/.config
+          echo "CONFIG_ZRAM=y" >> out/.config
+          
+          make -j$(nproc --all) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- KCFLAGS="-w -Wno-error"
+
+      - name: Download SukiSU App
+        run: |
+          APK_URL=$(curl -s https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | grep "browser_download_url.*apk" | cut -d '"' -f 4)
+          curl -L $APK_URL -o SukiSU-Manager.apk
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/README.md
+          cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+          cp SukiSU-Manager.apk AnyKernel3/
+          
+          cd AnyKernel3
+          sed -i 's|do.devicecheck=1|do.devicecheck=0|' anykernel.sh
+          sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot|block=/dev/block/bootdevice/by-name/boot|' anykernel.sh
+          
+          # 4GB zRAM Init script
+          cat <<EOF >> anykernel.sh
+          ui_print "- Setting up 4GB zRAM..."
+          echo 4294967296 > /sys/block/zram0/disksize
+          mkswap /dev/zram0
+          swapon /dev/zram0 -p 100
+          EOF
+          
+          zip -r9 ../9R-Final-Kernel.zip *
+
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: 9R-Kernel-Image
-          path: kernel/out/arch/arm64/boot/Image
+          name: 9R-SukiSU-Triple-Fallback
+          path: 9R-Final-Kernel.zip
