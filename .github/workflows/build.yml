@@ -28,11 +28,14 @@ jobs:
       - name: Build Kernel
         run: |
           cd kernel
-          # Link the system linker into the clang path to override the old one
+          # This command creates a link so the compiler finds the linker
           ln -sf /usr/bin/ld.lld $GITHUB_WORKSPACE/clang/bin/ld
           
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          make O=out ARCH=arm64 vendor/lemonades_perf_defconfig
+          
+          # WE CHANGED THE NAME HERE TO MATCH CRDROID'S SOURCE
+          make O=out ARCH=arm64 vendor/sm8250-perf_defconfig
+          
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
