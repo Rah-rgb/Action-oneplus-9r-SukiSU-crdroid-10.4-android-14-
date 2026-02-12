@@ -1,0 +1,44 @@
+name: Build OnePlus 9R Kernel (4.19.300)
+on:
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Build Essentials
+        run: |
+          sudo apt update
+          sudo apt install -y bc bison build-essential flex git libelf-dev libssl-dev python3
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 -b lineage-21 kernel
+          cd kernel
+          # Apply SusFS & SukiSU Hooks (Automated Script)
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -
+
+      - name: Setup Clang
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+
+      - name: Build Kernel
+        run: |
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          make O=out ARCH=arm64 vendor/lemonades_perf_defconfig
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 \
+            LLVM_IAS=1
+            
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: 9R-Kernel-Image
+          path: kernel/out/arch/arm64/boot/Image
