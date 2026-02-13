@@ -11,18 +11,10 @@ jobs:
 
       - name: Environment Setup
         run: |
-           # 1. Kill any background apt processes that might be holding the lock
-          sudo killall apt apt-get 2>/dev/null || true
-          sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
-          
-          # 2. Aggressive update with retry and lock-wait
-          sudo apt-get update -y || (sleep 10 && sudo apt-get update -y)
-          
-          # 3. Install with -o DPkg::Lock::Timeout=120 (waits up to 2 mins for lock)
-          sudo apt-get -o DPkg::Lock::Timeout=120 install -y --fix-missing \
-            bc bison build-essential flex git libelf-dev libssl-dev \
-            python3-is-python3 zip curl clang lld gcc-aarch64-linux-gnu \
-            libarchive-tools
+           sudo killall apt apt-get 2>/dev/null || true
+           sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
+           sudo apt-get update -y
+           sudo apt-get -o DPkg::Lock::Timeout=120 install -y --fix-missing bc bison build-essential flex git libelf-dev libssl-dev python3-is-python3 zip curl clang lld gcc-aarch64-linux-gnu libarchive-tools
 
       - name: Clone 9R Kernel Source
         run: |
